@@ -35,6 +35,7 @@ export default function PerfilPage() {
   const [email, setEmail] = useState('')
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [certificates, setCertificates] = useState<any[]>([])
+  const [avatarError, setAvatarError] = useState<string | null>(null)
 
   useEffect(() => { load() }, [])
 
@@ -62,20 +63,40 @@ export default function PerfilPage() {
     const file = e.target.files?.[0]
     if (!file) return
     setUploadingAvatar(true)
+    setAvatarError(null)
 
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    if (!user) { setUploadingAvatar(false); return }
 
-    const ext = file.name.split('.').pop()
+    // Valida tipo e tamanho (máx 5MB)
+    if (!file.type.startsWith('image/')) {
+      setAvatarError('Selecione uma imagem válida (JPG, PNG, etc)')
+      setUploadingAvatar(false)
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setAvatarError('A imagem deve ter no máximo 5MB')
+      setUploadingAvatar(false)
+      return
+    }
+
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
     const path = `avatars/${user.id}.${ext}`
 
-    const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true })
-    if (!error) {
-      const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path)
-      const url = urlData.publicUrl + '?t=' + Date.now()
-      await supabase.from('profiles').update({ avatar_url: url }).eq('id', user.id)
-      setAvatarUrl(url)
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(path, file, { upsert: true, contentType: file.type })
+
+    if (uploadError) {
+      setAvatarError('Erro ao enviar a imagem. Verifique se o bucket "avatars" está criado no Supabase Storage.')
+      setUploadingAvatar(false)
+      return
     }
+
+    const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path)
+    const url = urlData.publicUrl + '?t=' + Date.now()
+    await supabase.from('profiles').update({ avatar_url: url }).eq('id', user.id)
+    setAvatarUrl(url)
     setUploadingAvatar(false)
   }
 
@@ -171,7 +192,11 @@ export default function PerfilPage() {
                   </button>
                   <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
                 </div>
-                <p className="text-xs text-zinc-400">Clique para alterar a foto</p>
+                {avatarError ? (
+                  <p className="text-xs text-red-500 text-center max-w-[220px]">{avatarError}</p>
+                ) : (
+                  <p className="text-xs text-zinc-400">Clique para alterar a foto</p>
+                )}
               </div>
 
               {/* Fields */}

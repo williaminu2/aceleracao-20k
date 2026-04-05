@@ -104,6 +104,9 @@ export default function ComunidadePage() {
 
   async function handleChannelChange(id: string) {
     setActiveChannel(id)
+    setActiveTab('Discussão')
+    setSelectedLesson(null)
+    setSelectedCourse(null)
     if (id === 'inicio') {
       setActiveChannelLabel('')
       setActiveChannelAdminOnly(false)
