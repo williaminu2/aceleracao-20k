@@ -147,7 +147,7 @@ export default function ComunidadePage() {
                   adminOnly={activeChannelAdminOnly}
                   onPost={() => loadPosts(activeChannelLabel || undefined)}
                 />
-                <FeaturedPosts />
+                <FeaturedPosts channel={activeChannelLabel} />
                 {postsLoading ? (
                   <div className="flex justify-center py-10">
                     <span className="w-6 h-6 border-4 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
