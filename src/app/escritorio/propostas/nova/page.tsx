@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronRight, ChevronLeft, Plus, Search, X, Loader2, Check, MapPin } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Plus, Search, X, Loader2, Check, MapPin, User, Mail, Phone, FileText } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
 // ─── Dados estáticos ──────────────────────────────────────────────────────────
@@ -147,6 +147,16 @@ export default function NovaPropostaPage() {
   const [userId, setUserId] = useState<string | null>(null)
   const clientRef = useRef<HTMLDivElement>(null)
 
+  // Modal de novo cliente (2 passos)
+  const [showAddClient, setShowAddClient] = useState(false)
+  const [clientStep, setClientStep] = useState(1)
+  const [newClient, setNewClient] = useState({
+    name: '', email: '', phone: '', docType: 'CPF', docNumber: '',
+    cep: '', cidade: '', estado: '', bairro: '', endereco: '', numero: '', semNumero: false, complemento: '',
+  })
+  const [savingClient, setSavingClient] = useState(false)
+  const [clientCepLoading, setClientCepLoading] = useState(false)
+
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) { router.push('/login'); return }
@@ -213,6 +223,61 @@ export default function NovaPropostaPage() {
     if (step === 3) return form.services.every(s => !!s.deadline)
     if (step === 4) return form.services.every(s => !!s.value)
     return true
+  }
+
+  async function lookupClientCep(cep: string) {
+    const cleaned = cep.replace(/\D/g, '')
+    setNewClient(c => ({ ...c, cep: cleaned }))
+    if (cleaned.length !== 8) return
+    setClientCepLoading(true)
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${cleaned}/json/`)
+      const data = await res.json()
+      if (!data.erro) {
+        setNewClient(c => ({
+          ...c,
+          bairro: data.bairro || c.bairro,
+          endereco: data.logradouro || c.endereco,
+          cidade: data.localidade || c.cidade,
+          estado: data.uf || c.estado,
+        }))
+      }
+    } catch {}
+    setClientCepLoading(false)
+  }
+
+  async function handleAddClient() {
+    if (!newClient.name.trim() || savingClient || !userId) return
+    setSavingClient(true)
+
+    const address = [
+      newClient.endereco,
+      newClient.semNumero ? 'S/N' : newClient.numero,
+      newClient.complemento,
+      newClient.bairro,
+      newClient.cidade,
+      newClient.estado,
+      newClient.cep,
+    ].filter(Boolean).join(', ')
+
+    const { data } = await supabase.from('clients').insert({
+      user_id: userId,
+      name: newClient.name.trim(),
+      email: newClient.email.trim() || null,
+      phone: newClient.phone.trim() || null,
+      cpf_cnpj: newClient.docNumber.trim() || null,
+      address: address || null,
+    }).select('id, name, cpf_cnpj').single()
+
+    if (data) {
+      setClients(c => [...c, data].sort((a, b) => a.name.localeCompare(b.name)))
+      setF('client_id', data.id)
+      setF('client_name', data.name)
+      setShowAddClient(false)
+      setClientStep(1)
+      setNewClient({ name: '', email: '', phone: '', docType: 'CPF', docNumber: '', cep: '', cidade: '', estado: '', bairro: '', endereco: '', numero: '', semNumero: false, complemento: '' })
+    }
+    setSavingClient(false)
   }
 
   async function handleSave() {
@@ -294,9 +359,9 @@ export default function NovaPropostaPage() {
                       </button>
                     ) : (
                       <button
-                        onClick={() => router.push('/escritorio/clientes')}
+                        onClick={() => { setShowAddClient(true); setShowClientList(false) }}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-blue-600 transition"
-                        title="Cadastrar novo cliente"
+                        title="Adicionar novo cliente"
                       >
                         <Plus size={16} />
                       </button>
@@ -559,6 +624,170 @@ export default function NovaPropostaPage() {
           )}
         </div>
       </div>
+
+      {/* Modal: adicionar cliente */}
+      {showAddClient && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-100 flex-shrink-0">
+              <h3 className="font-bold text-zinc-900 text-base">Adicionar cliente</h3>
+              <button onClick={() => { setShowAddClient(false); setClientStep(1) }} className="p-1.5 hover:bg-zinc-100 rounded-lg transition">
+                <X size={16} className="text-zinc-500" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 p-6 space-y-4">
+
+              {/* ── Passo 1: Dados pessoais ── */}
+              {clientStep === 1 && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-700 mb-1">Nome <span className="text-red-500">*</span></label>
+                    <div className="relative">
+                      <User size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                      <input autoFocus value={newClient.name} onChange={e => setNewClient(c => ({ ...c, name: e.target.value }))}
+                        placeholder="Digite o nome do seu cliente"
+                        className="w-full pl-9 pr-4 py-2.5 text-sm border border-zinc-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 transition" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-700 mb-1">Email</label>
+                    <div className="relative">
+                      <Mail size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                      <input type="email" value={newClient.email} onChange={e => setNewClient(c => ({ ...c, email: e.target.value }))}
+                        placeholder="exemplo@gmail.com"
+                        className="w-full pl-9 pr-4 py-2.5 text-sm border border-zinc-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 transition" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-700 mb-1">Telefone</label>
+                    <div className="flex gap-2">
+                      <div className="flex items-center gap-1.5 px-3 py-2.5 border border-zinc-200 rounded-xl bg-zinc-50 text-sm flex-shrink-0">
+                        🇧🇷 <span className="text-xs text-zinc-400">+55</span>
+                      </div>
+                      <input value={newClient.phone} onChange={e => setNewClient(c => ({ ...c, phone: e.target.value }))}
+                        placeholder="(00) 00000-0000"
+                        className="flex-1 px-3 py-2.5 text-sm border border-zinc-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 transition" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-700 mb-1">Documento</label>
+                      <div className="relative">
+                        <FileText size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                        <select value={newClient.docType} onChange={e => setNewClient(c => ({ ...c, docType: e.target.value, docNumber: '' }))}
+                          className="w-full pl-9 pr-3 py-2.5 text-sm border border-zinc-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 transition appearance-none bg-white">
+                          <option>CPF</option>
+                          <option>CNPJ</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-700 mb-1">Número do {newClient.docType}</label>
+                      <input value={newClient.docNumber} onChange={e => setNewClient(c => ({ ...c, docNumber: e.target.value }))}
+                        placeholder={newClient.docType === 'CPF' ? '000.000.000-00' : '00.000.000/0001-00'}
+                        className="w-full px-3 py-2.5 text-sm border border-zinc-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 transition" />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* ── Passo 2: Endereço ── */}
+              {clientStep === 2 && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-700 mb-1">CEP</label>
+                    <div className="relative">
+                      <MapPin size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                      <input value={newClient.cep} onChange={e => lookupClientCep(e.target.value)}
+                        placeholder="00000-000" maxLength={9}
+                        className="w-full pl-9 pr-8 py-2.5 text-sm border border-zinc-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 transition" />
+                      {clientCepLoading && <Loader2 size={13} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-zinc-400" />}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-700 mb-1">Cidade</label>
+                      <input value={newClient.cidade} onChange={e => setNewClient(c => ({ ...c, cidade: e.target.value }))}
+                        className="w-full px-3 py-2.5 text-sm border border-zinc-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 transition" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-700 mb-1">Estado</label>
+                      <input value={newClient.estado} onChange={e => setNewClient(c => ({ ...c, estado: e.target.value }))}
+                        className="w-full px-3 py-2.5 text-sm border border-zinc-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 transition" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-700 mb-1">Bairro</label>
+                    <input value={newClient.bairro} onChange={e => setNewClient(c => ({ ...c, bairro: e.target.value }))}
+                      className="w-full px-3 py-2.5 text-sm border border-zinc-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 transition" />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-700 mb-1">Endereço</label>
+                    <input value={newClient.endereco} onChange={e => setNewClient(c => ({ ...c, endereco: e.target.value }))}
+                      placeholder="Rua / Avenida"
+                      className="w-full px-3 py-2.5 text-sm border border-zinc-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 transition" />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-700 mb-1">Número <span className="text-red-500">*</span></label>
+                    <div className="flex items-center gap-3">
+                      <input value={newClient.semNumero ? '' : newClient.numero}
+                        onChange={e => setNewClient(c => ({ ...c, numero: e.target.value }))}
+                        disabled={newClient.semNumero}
+                        placeholder="Nº"
+                        className="flex-1 px-3 py-2.5 text-sm border border-zinc-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 transition disabled:bg-zinc-50 disabled:text-zinc-400" />
+                      <label className="flex items-center gap-2 text-sm text-zinc-600 cursor-pointer whitespace-nowrap">
+                        <input type="checkbox" checked={newClient.semNumero}
+                          onChange={e => setNewClient(c => ({ ...c, semNumero: e.target.checked, numero: '' }))}
+                          className="w-4 h-4 accent-blue-600" />
+                        Sem número
+                      </label>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-700 mb-1">Complemento (opcional)</label>
+                    <textarea value={newClient.complemento} onChange={e => setNewClient(c => ({ ...c, complemento: e.target.value }))}
+                      rows={3} placeholder="Apto, Sala, Bloco..."
+                      className="w-full px-3 py-2.5 text-sm border border-zinc-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 transition resize-none" />
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between px-6 pb-6 pt-2 flex-shrink-0">
+              {clientStep === 2 ? (
+                <button onClick={() => setClientStep(1)}
+                  className="px-5 py-2.5 text-sm font-semibold border border-zinc-200 text-zinc-600 rounded-xl hover:bg-zinc-50 transition">
+                  Voltar
+                </button>
+              ) : <div />}
+
+              {clientStep === 1 ? (
+                <button onClick={() => setClientStep(2)} disabled={!newClient.name.trim()}
+                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition">
+                  Próximo
+                </button>
+              ) : (
+                <button onClick={handleAddClient} disabled={savingClient || (!newClient.semNumero && !newClient.numero)}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition">
+                  {savingClient && <Loader2 size={14} className="animate-spin" />}
+                  Cadastrar
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer com navegação */}
       <div className="sticky bottom-0 bg-white border-t border-zinc-200 px-6 py-4 flex gap-3">
