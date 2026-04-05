@@ -7,7 +7,7 @@ import timeGridPlugin from '@fullcalendar/timegrid'
 import listPlugin from '@fullcalendar/list'
 import interactionPlugin from '@fullcalendar/interaction'
 import ptBrLocale from '@fullcalendar/core/locales/pt-br'
-import { X, MapPin, Video, Calendar, Clock, Plus, Loader2, ExternalLink } from 'lucide-react'
+import { X, MapPin, Video, Calendar, Clock, Plus, Loader2, ExternalLink, Trash2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
 interface Event {
@@ -39,6 +39,8 @@ export function EventsCalendar() {
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [rsvpLoading, setRsvpLoading] = useState(false)
+  const [deletingEvent, setDeletingEvent] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
   const calendarRef = useRef<any>(null)
 
   // Form criar evento
@@ -48,7 +50,14 @@ export function EventsCalendar() {
   })
   const [creating, setCreating] = useState(false)
 
-  useEffect(() => { loadEvents() }, [])
+  useEffect(() => {
+    loadEvents()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from('profiles').select('role').eq('id', user.id).single()
+        .then(({ data }) => setIsAdmin(data?.role === 'admin'))
+    })
+  }, [])
 
   async function loadEvents() {
     const { data: { user } } = await supabase.auth.getUser()
@@ -84,6 +93,16 @@ export function EventsCalendar() {
     const updated = events.find(e => e.id === event.id)
     if (updated) setSelectedEvent({ ...updated, my_rsvp: !event.my_rsvp })
     setRsvpLoading(false)
+  }
+
+  async function handleDeleteEvent(event: Event) {
+    if (!confirm(`Excluir o evento "${event.title}"?`)) return
+    setDeletingEvent(true)
+    await supabase.from('event_rsvps').delete().eq('event_id', event.id)
+    await supabase.from('events').delete().eq('id', event.id)
+    setSelectedEvent(null)
+    await loadEvents()
+    setDeletingEvent(false)
   }
 
   async function handleCreate() {
@@ -252,6 +271,18 @@ export function EventsCalendar() {
                 {rsvpLoading && <Loader2 size={13} className="animate-spin" />}
                 {selectedEvent.my_rsvp ? 'Cancelar inscrição' : 'Registrar'}
               </button>
+
+              {/* Botão excluir (admin only) */}
+              {isAdmin && (
+                <button
+                  onClick={() => handleDeleteEvent(selectedEvent)}
+                  disabled={deletingEvent}
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 transition flex items-center justify-center gap-2"
+                >
+                  {deletingEvent ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                  Excluir evento
+                </button>
+              )}
             </div>
           </div>
         </div>
