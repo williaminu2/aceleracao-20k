@@ -14,6 +14,7 @@ import { supabase } from '@/lib/supabase'
 import { Avatar } from '@/components/ui/Avatar'
 import { getLevelInfo, LEVELS as LEVELS_LIST } from '@/lib/levels'
 import { CursosSection } from '@/components/admin/CursosSection'
+import { logAction } from '@/lib/adminLog'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -68,7 +69,7 @@ const ICON_MAP: Record<string, any> = {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-type Section = 'niveis' | 'usuarios' | 'canais' | 'postagens' | 'cursos'
+type Section = 'niveis' | 'usuarios' | 'canais' | 'postagens' | 'cursos' | 'logs'
 
 export default function AdminPage() {
   const router = useRouter()
@@ -97,6 +98,7 @@ export default function AdminPage() {
     { key: 'canais', label: 'Canais', icon: Radio },
     { key: 'postagens', label: 'Postagens', icon: FileText },
     { key: 'cursos', label: 'Cursos', icon: BookOpen },
+    { key: 'logs', label: 'Logs de Admin', icon: BarChart2 },
   ]
 
   return (
@@ -133,6 +135,7 @@ export default function AdminPage() {
           {section === 'canais' && <CanaisSection />}
           {section === 'postagens' && <PostagensSection />}
           {section === 'cursos' && <CursosSection />}
+          {section === 'logs' && <LogsSection />}
         </div>
       </div>
     </div>
@@ -172,6 +175,18 @@ function NiveisSection() {
     if (approved) {
       await supabase.from('profiles').update({ level: s.target_level }).eq('id', s.user_id)
     }
+    await logAction({
+      action: approved ? 'Aprovação de nível' : 'Rejeição de nível',
+      targetType: 'nivel',
+      targetId: s.user_id,
+      targetName: s.profiles?.full_name,
+      details: {
+        faixa: getLevelInfo(s.target_level).faixa,
+        valor_recebido: s.amount_received,
+        valor_contratado: s.amount_contracted,
+        observacao: notes[s.id] || null,
+      },
+    })
     await load()
     setProcessing(null)
   }
@@ -327,37 +342,54 @@ function UsuariosSection() {
   }
 
   async function removeUser(id: string) {
+    const member = members.find(m => m.id === id)
     if (!confirm('Remover este usuário? Ele perderá acesso à plataforma.')) return
     setProcessing(id)
     await supabase.from('profiles').update({ status: 'banned' }).eq('id', id)
+    await logAction({ action: 'Usuário removido', targetType: 'usuario', targetId: id, targetName: member?.full_name })
     await load()
     setProcessing(null)
   }
 
   async function reactivate(id: string) {
+    const member = members.find(m => m.id === id)
     setProcessing(id)
     await supabase.from('profiles').update({ status: 'active' }).eq('id', id)
+    await logAction({ action: 'Usuário reativado', targetType: 'usuario', targetId: id, targetName: member?.full_name })
     await load()
     setProcessing(null)
   }
 
   async function approveUser(id: string) {
+    const member = members.find(m => m.id === id)
     setProcessing(id)
     await supabase.from('profiles').update({ status: 'active' }).eq('id', id)
+    await logAction({ action: 'Usuário aprovado', targetType: 'usuario', targetId: id, targetName: member?.full_name })
     await load()
     setProcessing(null)
   }
 
   async function setRole(id: string, role: string) {
+    const member = members.find(m => m.id === id)
     setProcessing(id)
     await supabase.from('profiles').update({ role }).eq('id', id)
+    await logAction({
+      action: role === 'admin' ? 'Usuário promovido a admin' : 'Admin rebaixado a membro',
+      targetType: 'usuario', targetId: id, targetName: member?.full_name,
+    })
     await load()
     setProcessing(null)
   }
 
   async function setLevel(id: string, level: number) {
+    const member = members.find(m => m.id === id)
     setProcessing(id)
     await supabase.from('profiles').update({ level }).eq('id', id)
+    await logAction({
+      action: 'Faixa alterada manualmente',
+      targetType: 'usuario', targetId: id, targetName: member?.full_name,
+      details: { faixa_anterior: getLevelInfo(member?.level || 0).faixa, nova_faixa: getLevelInfo(level).faixa },
+    })
     setLevelPickerId(null)
     await load()
     setProcessing(null)
@@ -535,6 +567,7 @@ function CanaisSection() {
     setSaving(true)
     const maxOrder = channels.length > 0 ? Math.max(...channels.map(c => c.order_index)) + 1 : 1
     await supabase.from('channels').insert({ label: newLabel.trim(), icon: newIcon, order_index: maxOrder })
+    await logAction({ action: 'Canal criado', targetType: 'canal', targetName: newLabel.trim() })
     setNewLabel('')
     setNewIcon('Hash')
     await load()
@@ -542,9 +575,11 @@ function CanaisSection() {
   }
 
   async function handleDelete(id: string) {
+    const channel = channels.find(c => c.id === id)
     if (!confirm('Remover este canal? As postagens do canal não serão excluídas.')) return
     setDeleting(id)
     await supabase.from('channels').delete().eq('id', id)
+    await logAction({ action: 'Canal removido', targetType: 'canal', targetId: id, targetName: channel?.label })
     await load()
     setDeleting(null)
   }
@@ -556,9 +591,14 @@ function CanaisSection() {
   }
 
   async function handleSaveEdit(id: string) {
+    const channel = channels.find(c => c.id === id)
     if (!editLabel.trim()) return
     setEditSaving(true)
     await supabase.from('channels').update({ label: editLabel.trim(), icon: editIcon }).eq('id', id)
+    await logAction({
+      action: 'Canal editado', targetType: 'canal', targetId: id,
+      details: { nome_anterior: channel?.label, novo_nome: editLabel.trim() },
+    })
     setEditing(null)
     await load()
     setEditSaving(false)
@@ -654,6 +694,10 @@ function CanaisSection() {
                     <button
                       onClick={async () => {
                         await supabase.from('channels').update({ admin_only: !c.admin_only }).eq('id', c.id)
+                        await logAction({
+                          action: c.admin_only ? 'Canal liberado para todos' : 'Canal restrito a admins',
+                          targetType: 'canal', targetId: c.id, targetName: c.label,
+                        })
                         await load()
                       }}
                       title={c.admin_only ? 'Somente admins podem postar — clique para liberar' : 'Qualquer membro pode postar — clique para restringir'}
@@ -707,15 +751,25 @@ function PostagensSection() {
   }
 
   async function handleDelete(id: string) {
+    const post = posts.find(p => p.id === id)
     if (!confirm('Excluir esta postagem permanentemente?')) return
     setDeleting(id)
     await supabase.from('posts').delete().eq('id', id)
+    await logAction({
+      action: 'Postagem excluída', targetType: 'postagem', targetId: id,
+      details: { autor: post?.profiles?.full_name, canal: post?.channel, trecho: post?.content?.slice(0, 80) },
+    })
     await load()
     setDeleting(null)
   }
 
   async function togglePin(post: Post) {
     await supabase.from('posts').update({ pinned: !post.pinned }).eq('id', post.id)
+    await logAction({
+      action: post.pinned ? 'Postagem desafixada' : 'Postagem fixada',
+      targetType: 'postagem', targetId: post.id,
+      details: { canal: post.channel, trecho: post.content?.slice(0, 80) },
+    })
     await load()
   }
 
@@ -768,6 +822,171 @@ function PostagensSection() {
                   className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition">
                   {deleting === p.id ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
                 </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Seção: Logs de Admin ─────────────────────────────────────────────────────
+
+interface AdminLog {
+  id: string
+  admin_id: string
+  action: string
+  target_type: string | null
+  target_id: string | null
+  target_name: string | null
+  details: Record<string, any> | null
+  created_at: string
+  profiles: { full_name: string; avatar_url: string | null } | null
+}
+
+const TARGET_TYPE_LABELS: Record<string, string> = {
+  usuario: 'Usuário',
+  canal: 'Canal',
+  postagem: 'Postagem',
+  curso: 'Curso',
+  nivel: 'Nível',
+}
+
+const TARGET_TYPE_COLORS: Record<string, string> = {
+  usuario: 'bg-blue-100 text-blue-700',
+  canal: 'bg-purple-100 text-purple-700',
+  postagem: 'bg-zinc-100 text-zinc-700',
+  curso: 'bg-green-100 text-green-700',
+  nivel: 'bg-orange-100 text-orange-700',
+}
+
+function LogsSection() {
+  const [logs, setLogs] = useState<AdminLog[]>([])
+  const [loading, setLoading] = useState(true)
+  const [filterType, setFilterType] = useState('all')
+  const [filterAdmin, setFilterAdmin] = useState('all')
+  const [admins, setAdmins] = useState<{ id: string; full_name: string }[]>([])
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    setLoading(true)
+    const { data } = await supabase
+      .from('admin_logs')
+      .select('*, profiles (full_name, avatar_url)')
+      .order('created_at', { ascending: false })
+      .limit(300)
+    if (data) {
+      setLogs(data as any)
+      const seen = new Set<string>()
+      const adminList: { id: string; full_name: string }[] = []
+      for (const log of data as any[]) {
+        if (log.admin_id && !seen.has(log.admin_id)) {
+          seen.add(log.admin_id)
+          adminList.push({ id: log.admin_id, full_name: log.profiles?.full_name || 'Admin' })
+        }
+      }
+      setAdmins(adminList)
+    }
+    setLoading(false)
+  }
+
+  const filtered = logs.filter(l => {
+    const typeOk = filterType === 'all' || l.target_type === filterType
+    const adminOk = filterAdmin === 'all' || l.admin_id === filterAdmin
+    return typeOk && adminOk
+  })
+
+  function formatDate(iso: string) {
+    const d = new Date(iso)
+    return d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h2 className="font-bold text-zinc-900">Logs de Administrador</h2>
+        <span className="text-xs text-zinc-400">{filtered.length} registros</span>
+      </div>
+
+      <div className="flex gap-3 flex-wrap">
+        <div className="flex gap-1.5 flex-wrap">
+          {[
+            { key: 'all', label: 'Todos' },
+            { key: 'usuario', label: 'Usuários' },
+            { key: 'canal', label: 'Canais' },
+            { key: 'postagem', label: 'Postagens' },
+            { key: 'curso', label: 'Cursos' },
+            { key: 'nivel', label: 'Níveis' },
+          ].map(f => (
+            <button key={f.key} onClick={() => setFilterType(f.key)}
+              className={`px-3 py-1.5 text-xs rounded-lg font-medium transition ${
+                filterType === f.key ? 'bg-orange-500 text-white' : 'bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50'
+              }`}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+        {admins.length > 1 && (
+          <select
+            value={filterAdmin}
+            onChange={e => setFilterAdmin(e.target.value)}
+            className="px-3 py-1.5 text-xs border border-zinc-200 bg-white rounded-lg outline-none focus:ring-2 focus:ring-orange-400 transition"
+          >
+            <option value="all">Todos os admins</option>
+            {admins.map(a => (
+              <option key={a.id} value={a.id}>{a.full_name}</option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-16">
+          <span className="w-8 h-8 border-4 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="bg-white rounded-xl border border-zinc-200 p-10 text-center text-zinc-400 text-sm">
+          Nenhum log encontrado. As ações dos administradores aparecerão aqui.
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden">
+          {filtered.map((log, i) => (
+            <div key={log.id} className={`px-5 py-4 ${i < filtered.length - 1 ? 'border-b border-zinc-100' : ''}`}>
+              <div className="flex items-start gap-3">
+                <Avatar name={log.profiles?.full_name || 'Admin'} src={log.profiles?.avatar_url} size="sm" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="text-sm font-semibold text-zinc-900">
+                      {log.profiles?.full_name || 'Admin'}
+                    </span>
+                    {log.target_type && (
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${TARGET_TYPE_COLORS[log.target_type] || 'bg-zinc-100 text-zinc-600'}`}>
+                        {TARGET_TYPE_LABELS[log.target_type] || log.target_type}
+                      </span>
+                    )}
+                    <span className="text-xs text-zinc-400 ml-auto">{formatDate(log.created_at)}</span>
+                  </div>
+                  <p className="text-sm text-zinc-700 font-medium">{log.action}</p>
+                  {log.target_name && (
+                    <p className="text-xs text-zinc-500 mt-0.5">
+                      Alvo: <span className="font-medium text-zinc-700">{log.target_name}</span>
+                    </p>
+                  )}
+                  {log.details && Object.keys(log.details).length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                      {Object.entries(log.details).filter(([, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => (
+                        <span key={k} className="text-xs text-zinc-500">
+                          <span className="font-medium text-zinc-600">{k.replace(/_/g, ' ')}:</span>{' '}
+                          {typeof v === 'number' && k.startsWith('valor')
+                            ? `R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+                            : String(v)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           ))}

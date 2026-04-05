@@ -6,6 +6,7 @@ import {
   BookOpen, GripVertical, X, Check
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { logAction } from '@/lib/adminLog'
 
 interface Lesson {
   id: string
@@ -129,9 +130,11 @@ export function CursosSection() {
     }
     if (editingCourse) {
       await supabase.from('courses').update(payload).eq('id', editingCourse.id)
+      await logAction({ action: 'Curso editado', targetType: 'curso', targetId: editingCourse.id, targetName: payload.title })
     } else {
       const maxOrder = courses.length > 0 ? Math.max(...courses.map(c => c.order_index)) + 1 : 1
       await supabase.from('courses').insert({ ...payload, order_index: maxOrder })
+      await logAction({ action: 'Curso criado', targetType: 'curso', targetName: payload.title })
     }
     setShowCourseModal(false)
     await load()
@@ -139,15 +142,21 @@ export function CursosSection() {
   }
 
   async function deleteCourse(id: string) {
+    const course = courses.find(c => c.id === id)
     if (!confirm('Excluir este curso e todos os seus módulos e aulas?')) return
     setDeleting(id)
     await supabase.from('courses').delete().eq('id', id)
+    await logAction({ action: 'Curso excluído', targetType: 'curso', targetId: id, targetName: course?.title })
     await load()
     setDeleting(null)
   }
 
   async function togglePublish(c: Course) {
     await supabase.from('courses').update({ published: !c.published }).eq('id', c.id)
+    await logAction({
+      action: c.published ? 'Curso despublicado' : 'Curso publicado',
+      targetType: 'curso', targetId: c.id, targetName: c.title,
+    })
     await load()
   }
 
@@ -170,13 +179,15 @@ export function CursosSection() {
   async function saveModule() {
     if (!moduleTitle.trim() || savingModule || !moduleParentId) return
     setSavingModule(true)
+    const course = courses.find(c => c.id === moduleParentId)
     if (editingModule) {
       await supabase.from('modules').update({ title: moduleTitle.trim() }).eq('id', editingModule.id)
+      await logAction({ action: 'Módulo editado', targetType: 'curso', targetName: `${course?.title} › ${moduleTitle.trim()}` })
     } else {
-      const course = courses.find(c => c.id === moduleParentId)
       const maxOrder = course && course.modules.length > 0
         ? Math.max(...course.modules.map(m => m.order_index)) + 1 : 1
       await supabase.from('modules').insert({ course_id: moduleParentId, title: moduleTitle.trim(), order_index: maxOrder })
+      await logAction({ action: 'Módulo criado', targetType: 'curso', targetName: `${course?.title} › ${moduleTitle.trim()}` })
     }
     setShowModuleModal(false)
     await load()
@@ -187,6 +198,7 @@ export function CursosSection() {
     if (!confirm('Excluir este módulo e todas as suas aulas?')) return
     setDeleting(id)
     await supabase.from('modules').delete().eq('id', id)
+    await logAction({ action: 'Módulo excluído', targetType: 'curso', targetId: id })
     await load()
     setDeleting(null)
   }
@@ -221,8 +233,8 @@ export function CursosSection() {
     }
     if (editingLesson) {
       await supabase.from('lessons').update(payload).eq('id', editingLesson.id)
+      await logAction({ action: 'Aula editada', targetType: 'curso', targetName: payload.title })
     } else {
-      // Encontrar o módulo para calcular order_index
       let maxOrder = 1
       for (const c of courses) {
         const mod = c.modules.find(m => m.id === lessonParentModuleId)
@@ -232,6 +244,7 @@ export function CursosSection() {
         }
       }
       await supabase.from('lessons').insert({ module_id: lessonParentModuleId, ...payload, order_index: maxOrder })
+      await logAction({ action: 'Aula criada', targetType: 'curso', targetName: payload.title })
     }
     setShowLessonModal(false)
     await load()
@@ -242,6 +255,7 @@ export function CursosSection() {
     if (!confirm('Excluir esta aula?')) return
     setDeleting(id)
     await supabase.from('lessons').delete().eq('id', id)
+    await logAction({ action: 'Aula excluída', targetType: 'curso', targetId: id })
     await load()
     setDeleting(null)
   }
