@@ -8,11 +8,12 @@ import {
   CheckCircle, XCircle, Clock, ExternalLink, ArrowLeft,
   Hash, Megaphone, UserCircle, Link2, Bot, HelpCircle,
   Zap, BarChart2, Trophy, Briefcase, Cpu, AlertCircle,
-  Trash2, Plus, Users, Radio, FileText, TrendingUp, Loader2, ShieldCheck, ShieldOff, Pencil,
+  Trash2, Plus, Users, Radio, FileText, TrendingUp, Loader2, ShieldCheck, ShieldOff, Pencil, BookOpen,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Avatar } from '@/components/ui/Avatar'
 import { getLevelInfo, LEVELS as LEVELS_LIST } from '@/lib/levels'
+import { CursosSection } from '@/components/admin/CursosSection'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -67,7 +68,7 @@ const ICON_MAP: Record<string, any> = {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-type Section = 'niveis' | 'usuarios' | 'canais' | 'postagens'
+type Section = 'niveis' | 'usuarios' | 'canais' | 'postagens' | 'cursos'
 
 export default function AdminPage() {
   const router = useRouter()
@@ -95,6 +96,7 @@ export default function AdminPage() {
     { key: 'usuarios', label: 'Usuários', icon: Users },
     { key: 'canais', label: 'Canais', icon: Radio },
     { key: 'postagens', label: 'Postagens', icon: FileText },
+    { key: 'cursos', label: 'Cursos', icon: BookOpen },
   ]
 
   return (
@@ -130,6 +132,7 @@ export default function AdminPage() {
           {section === 'usuarios' && <UsuariosSection />}
           {section === 'canais' && <CanaisSection />}
           {section === 'postagens' && <PostagensSection />}
+          {section === 'cursos' && <CursosSection />}
         </div>
       </div>
     </div>
