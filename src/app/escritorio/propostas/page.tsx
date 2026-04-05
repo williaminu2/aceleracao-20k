@@ -3,7 +3,8 @@
 export const dynamic = 'force-dynamic'
 
 import { useEffect, useState, useMemo } from 'react'
-import { Plus, Pencil, Trash2, Loader2, X, Search, Eye, FileText, AlertCircle, ChevronDown } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Plus, Pencil, Trash2, Loader2, X, Search, FileText, AlertCircle, ChevronDown } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
 interface Client { id: string; name: string }
@@ -87,6 +88,7 @@ function parseValue(s: string) {
 }
 
 export default function PropostasPage() {
+  const router = useRouter()
   const [proposals, setProposals] = useState<Proposal[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
@@ -226,7 +228,7 @@ export default function PropostasPage() {
           <h1 className="font-bold text-zinc-900 text-lg">Propostas</h1>
         </div>
         <button
-          onClick={openNew}
+          onClick={() => router.push('/escritorio/propostas/nova')}
           className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition"
         >
           <Plus size={15} /> Nova Proposta
