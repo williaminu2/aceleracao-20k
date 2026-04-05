@@ -737,7 +737,7 @@ export default function NovaPropostaPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 mb-1">Número <span className="text-red-500">*</span></label>
+                    <label className="block text-sm font-medium text-zinc-700 mb-1">Número</label>
                     <div className="flex items-center gap-3">
                       <input value={newClient.semNumero ? '' : newClient.numero}
                         onChange={e => setNewClient(c => ({ ...c, numero: e.target.value }))}
@@ -778,7 +778,7 @@ export default function NovaPropostaPage() {
                   Próximo
                 </button>
               ) : (
-                <button onClick={handleAddClient} disabled={savingClient || (!newClient.semNumero && !newClient.numero)}
+                <button onClick={handleAddClient} disabled={savingClient}
                   className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition">
                   {savingClient && <Loader2 size={14} className="animate-spin" />}
                   Cadastrar
