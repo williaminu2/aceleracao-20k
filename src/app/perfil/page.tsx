@@ -81,14 +81,14 @@ export default function PerfilPage() {
     }
 
     const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
-    const path = `avatars/${user.id}.${ext}`
+    const path = `${user.id}.${ext}`
 
     const { error: uploadError } = await supabase.storage
       .from('avatars')
       .upload(path, file, { upsert: true, contentType: file.type })
 
     if (uploadError) {
-      setAvatarError('Erro ao enviar a imagem. Verifique se o bucket "avatars" está criado no Supabase Storage.')
+      setAvatarError(`Erro: ${uploadError.message}`)
       setUploadingAvatar(false)
       return
     }
