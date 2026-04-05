@@ -216,12 +216,9 @@ export default function NovaPropostaPage() {
 
   const totalValue = form.services.reduce((sum, s) => sum + parseVal(s.value), 0)
 
-  // Validação por etapa
+  // Validação por etapa — só cliente e empreendimento são obrigatórios
   function canProceed() {
     if (step === 1) return !!form.client_id && !!form.title.trim()
-    if (step === 2) return form.services.length > 0
-    if (step === 3) return form.services.every(s => !!s.deadline)
-    if (step === 4) return form.services.every(s => !!s.value)
     return true
   }
 
