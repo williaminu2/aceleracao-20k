@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronRight, ChevronLeft, Plus, Search, X, Loader2, Check, MapPin, User, Mail, Phone, FileText } from 'lucide-react'
+import { ChevronRight, ChevronLeft, ChevronDown, Plus, Search, X, Loader2, Check, MapPin, User, Mail, Phone, FileText, Building2, CreditCard } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
 // ─── Dados estáticos ──────────────────────────────────────────────────────────
@@ -17,34 +17,21 @@ const STATES = [
   'Roraima', 'Santa Catarina', 'São Paulo', 'Sergipe', 'Tocantins',
 ]
 
-const BIM_SERVICES = [
-  { id: 'arq', label: 'Projeto Arquitetônico' },
-  { id: 'est', label: 'Projeto Estrutural' },
-  { id: 'hid', label: 'Projeto Hidrossanitário' },
-  { id: 'ele', label: 'Projeto Elétrico' },
-  { id: 'hvac', label: 'Projeto de Climatização (HVAC)' },
-  { id: 'inc', label: 'Projeto de Incêndio e Pânico' },
-  { id: 'bim', label: 'Modelagem BIM' },
-  { id: 'coord', label: 'Coordenação BIM' },
-  { id: 'int', label: 'Projeto de Interiores' },
-  { id: 'pai', label: 'Projeto Paisagístico' },
-  { id: 'top', label: 'Levantamento Topográfico' },
-  { id: 'lau', label: 'Laudo Técnico' },
-  { id: 'consult', label: 'Consultoria BIM' },
-  { id: 'out', label: 'Outros' },
-]
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Client { id: string; name: string; cpf_cnpj: string | null }
 
+interface NicheService { id: string; niche_id: string; name: string; unit: string; default_price: number }
+interface Niche { id: string; name: string; services: NicheService[] }
+
 interface ServiceEntry {
-  id: string
-  label: string
-  area: string
-  description: string
+  key: string       // unique key in table
+  serviceId: string
+  name: string
+  quantity: string
+  unit: string
+  unit_price: string
   deadline: string
-  value: string
 }
 
 interface FormData {
@@ -58,7 +45,12 @@ interface FormData {
   logradouro: string
   numero: string
   complemento: string
+  empreendimento_type: string
+  area: string
+  selected_niches: string[]
   services: ServiceEntry[]
+  discount: string
+  discount_type: '%' | 'R$'
   payment_terms: string
   valid_until: string
   follow_up_date: string
@@ -72,10 +64,14 @@ const EMPTY_FORM: FormData = {
   client_id: '', client_name: '', title: '',
   estado: 'Minas Gerais', cidade: '', cep: '',
   bairro: '', logradouro: '', numero: '', complemento: '',
-  services: [],
+  empreendimento_type: 'Residencial', area: '',
+  selected_niches: [], services: [],
+  discount: '', discount_type: '%',
   payment_terms: '', valid_until: '', follow_up_date: '',
   apresentacao: '', escopo: '', condicoes: '', observacoes: '',
 }
+
+const EMPREENDIMENTO_TYPES = ['Residencial', 'Comercial', 'Industrial', 'Institucional', 'Misto', 'Rural']
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -89,11 +85,6 @@ function Field({ label, required, children }: { label: string; required?: boolea
       {children}
     </div>
   )
-}
-
-function fmt(v: string) {
-  const n = parseFloat(v.replace(/\./g, '').replace(',', '.')) || 0
-  return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
 function parseVal(s: string) {
@@ -145,7 +136,11 @@ export default function NovaPropostaPage() {
   const [cepLoading, setCepLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
+  const [niches, setNiches] = useState<Niche[]>([])
+  const [nicheDropdownOpen, setNicheDropdownOpen] = useState(false)
+  const [selectedServiceToAdd, setSelectedServiceToAdd] = useState('')
   const clientRef = useRef<HTMLDivElement>(null)
+  const nicheRef = useRef<HTMLDivElement>(null)
 
   // Modal de novo cliente (2 passos)
   const [showAddClient, setShowAddClient] = useState(false)
@@ -163,13 +158,26 @@ export default function NovaPropostaPage() {
       setUserId(user.id)
       supabase.from('clients').select('id, name, cpf_cnpj').eq('user_id', user.id).order('name')
         .then(({ data }) => { if (data) setClients(data) })
+      // Carregar nichos e serviços
+      Promise.all([
+        supabase.from('niches').select('id, name').eq('user_id', user.id).order('name'),
+        supabase.from('niche_services').select('id, niche_id, name, unit, default_price').eq('user_id', user.id).order('name'),
+      ]).then(([{ data: nicheData }, { data: svcData }]) => {
+        if (nicheData) {
+          setNiches(nicheData.map(n => ({
+            ...n,
+            services: (svcData || []).filter(s => s.niche_id === n.id),
+          })))
+        }
+      })
     })
   }, [])
 
-  // Fecha dropdown ao clicar fora
+  // Fecha dropdowns ao clicar fora
   useEffect(() => {
     function handler(e: MouseEvent) {
       if (clientRef.current && !clientRef.current.contains(e.target as Node)) setShowClientList(false)
+      if (nicheRef.current && !nicheRef.current.contains(e.target as Node)) setNicheDropdownOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -201,20 +209,51 @@ export default function NovaPropostaPage() {
     setCepLoading(false)
   }
 
-  // Toggle serviço
-  function toggleService(svc: typeof BIM_SERVICES[0]) {
+  // Nichos helpers
+  function toggleNiche(id: string) {
     setForm(f => {
-      const exists = f.services.find(s => s.id === svc.id)
-      if (exists) return { ...f, services: f.services.filter(s => s.id !== svc.id) }
-      return { ...f, services: [...f.services, { id: svc.id, label: svc.label, area: '', description: '', deadline: '', value: '' }] }
+      const selected = f.selected_niches.includes(id)
+      return { ...f, selected_niches: selected ? f.selected_niches.filter(n => n !== id) : [...f.selected_niches, id] }
     })
   }
 
-  function updateService(id: string, key: keyof ServiceEntry, value: string) {
-    setForm(f => ({ ...f, services: f.services.map(s => s.id === id ? { ...s, [key]: value } : s) }))
+  // Serviços helpers
+  function addServiceEntry() {
+    if (!selectedServiceToAdd) return
+    const allSvcs = niches.flatMap(n => n.services)
+    const svc = allSvcs.find(s => s.id === selectedServiceToAdd)
+    if (!svc) return
+    const entry: ServiceEntry = {
+      key: `${svc.id}-${Date.now()}`,
+      serviceId: svc.id,
+      name: svc.name,
+      quantity: '1',
+      unit: svc.unit,
+      unit_price: svc.default_price > 0 ? String(svc.default_price).replace('.', ',') : '',
+      deadline: '',
+    }
+    setForm(f => ({ ...f, services: [...f.services, entry] }))
+    setSelectedServiceToAdd('')
   }
 
-  const totalValue = form.services.reduce((sum, s) => sum + parseVal(s.value), 0)
+  function removeServiceEntry(key: string) {
+    setForm(f => ({ ...f, services: f.services.filter(s => s.key !== key) }))
+  }
+
+  function updateServiceField(key: string, field: keyof ServiceEntry, value: string) {
+    setForm(f => ({ ...f, services: f.services.map(s => s.key === key ? { ...s, [field]: value } : s) }))
+  }
+
+  const subtotal = form.services.reduce((sum, s) => sum + parseVal(s.quantity) * parseVal(s.unit_price), 0)
+  const discountAmt = form.discount_type === '%'
+    ? subtotal * (parseVal(form.discount) / 100)
+    : parseVal(form.discount)
+  const totalValue = subtotal - discountAmt
+
+  // Serviços disponíveis = todos os serviços dos nichos selecionados
+  const availableServices = niches
+    .filter(n => form.selected_niches.includes(n.id))
+    .flatMap(n => n.services)
 
   // Validação por etapa — só cliente e empreendimento são obrigatórios
   function canProceed() {
@@ -292,7 +331,7 @@ export default function NovaPropostaPage() {
       client_name: form.client_name,
       title: form.title,
       status: 'sent',
-      value: totalValue,
+      value: totalValue > 0 ? totalValue : null,
       valid_until: form.valid_until || null,
       follow_up_date: form.follow_up_date || null,
       estado: form.estado,
@@ -388,12 +427,12 @@ export default function NovaPropostaPage() {
 
               {/* Estado + Cidade */}
               <div className="grid grid-cols-2 gap-3">
-                <Field label="Estado" required>
+                <Field label="Estado">
                   <select value={form.estado} onChange={e => setF('estado', e.target.value)} className={inputCls}>
                     {STATES.map(s => <option key={s}>{s}</option>)}
                   </select>
                 </Field>
-                <Field label="Cidade" required>
+                <Field label="Cidade">
                   <input value={form.cidade} onChange={e => setF('cidade', e.target.value)}
                     placeholder="Cidade" className={inputCls} />
                 </Field>
@@ -435,49 +474,197 @@ export default function NovaPropostaPage() {
 
           {/* ── Step 2: Demanda ── */}
           {step === 2 && (
-            <div className="space-y-5">
-              <h2 className="text-xl font-bold text-zinc-900">Demanda de serviços</h2>
-              <p className="text-sm text-zinc-500">Selecione os serviços que farão parte desta proposta</p>
+            <div className="space-y-4">
+              <h2 className="text-xl font-bold text-zinc-900 flex items-center gap-2">
+                📄 Criando proposta
+              </h2>
               <div className="w-full h-px bg-zinc-200" />
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {BIM_SERVICES.map(svc => {
-                  const selected = form.services.find(s => s.id === svc.id)
-                  return (
-                    <button key={svc.id} onClick={() => toggleService(svc)}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition ${
-                        selected ? 'border-blue-500 bg-blue-50 text-blue-800' : 'border-zinc-200 bg-white text-zinc-700 hover:border-blue-300 hover:bg-blue-50/50'
-                      }`}>
-                      <div className={`w-5 h-5 rounded-md border-2 flex-shrink-0 flex items-center justify-center ${
-                        selected ? 'border-blue-600 bg-blue-600' : 'border-zinc-300'
-                      }`}>
-                        {selected && <Check size={12} className="text-white" />}
-                      </div>
-                      <span className="text-sm font-medium">{svc.label}</span>
-                    </button>
-                  )
-                })}
-              </div>
+              {/* Tipo de Empreendimento */}
+              <Field label="Tipo de Empreendimento">
+                <select value={form.empreendimento_type} onChange={e => setF('empreendimento_type', e.target.value)} className={inputCls}>
+                  {EMPREENDIMENTO_TYPES.map(t => <option key={t}>{t}</option>)}
+                </select>
+              </Field>
 
-              {/* Detalhes dos serviços selecionados */}
+              {/* Área Construída */}
+              <Field label="Área Construída do Empreendimento">
+                <div className="relative">
+                  <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                  <input type="number" value={form.area} onChange={e => setF('area', e.target.value)}
+                    placeholder="0,00" className={inputCls + ' pl-9 pr-12'} />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-medium">m²</span>
+                </div>
+              </Field>
+
+              {/* Seleção de Nichos */}
+              <Field label="Selecione um Nicho">
+                <div className="relative" ref={nicheRef}>
+                  <div
+                    onClick={() => setNicheDropdownOpen(v => !v)}
+                    className={`${inputCls} cursor-pointer flex items-center flex-wrap gap-1.5 min-h-[42px]`}
+                  >
+                    {form.selected_niches.length === 0 ? (
+                      <span className="text-zinc-400 text-sm">Selecionar nicho...</span>
+                    ) : form.selected_niches.map(id => {
+                      const n = niches.find(x => x.id === id)
+                      if (!n) return null
+                      return (
+                        <span key={id} className="flex items-center gap-1 px-2.5 py-0.5 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">
+                          {n.name}
+                          <button type="button" onClick={e => { e.stopPropagation(); toggleNiche(id) }} className="hover:text-blue-900 ml-0.5">
+                            <X size={10} />
+                          </button>
+                        </span>
+                      )
+                    })}
+                    <ChevronDown size={14} className={`text-zinc-400 ml-auto flex-shrink-0 transition-transform ${nicheDropdownOpen ? 'rotate-180' : ''}`} />
+                  </div>
+                  {nicheDropdownOpen && (
+                    <div className="absolute z-20 w-full mt-1 bg-white border border-zinc-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                      {niches.length === 0 ? (
+                        <p className="text-sm text-zinc-400 px-4 py-3">Nenhum nicho cadastrado. Acesse Configurações para criar.</p>
+                      ) : niches.map(n => {
+                        const sel = form.selected_niches.includes(n.id)
+                        return (
+                          <button key={n.id} type="button" onClick={() => toggleNiche(n.id)}
+                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-blue-50 flex items-center gap-2.5 transition">
+                            <div className={`w-4 h-4 rounded border-2 flex-shrink-0 flex items-center justify-center ${sel ? 'border-blue-600 bg-blue-600' : 'border-zinc-300'}`}>
+                              {sel && <Check size={10} className="text-white" />}
+                            </div>
+                            <span className="font-medium text-zinc-800">{n.name}</span>
+                            <span className="text-xs text-zinc-400 ml-auto">{n.services.length} serviço{n.services.length !== 1 ? 's' : ''}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </Field>
+
+              {/* Adicionar serviço */}
+              <Field label="Adicionar serviço">
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                    <select value={selectedServiceToAdd} onChange={e => setSelectedServiceToAdd(e.target.value)}
+                      className={inputCls + ' pl-9 appearance-none'}
+                      disabled={form.selected_niches.length === 0}>
+                      <option value="">{form.selected_niches.length === 0 ? 'Selecione um nicho primeiro...' : 'Selecione...'}</option>
+                      {availableServices.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button type="button" onClick={addServiceEntry} disabled={!selectedServiceToAdd}
+                    className="flex-shrink-0 w-10 h-10 flex items-center justify-center border-2 border-blue-500 text-blue-600 rounded-xl hover:bg-blue-50 disabled:opacity-30 disabled:cursor-not-allowed transition">
+                    <Plus size={18} />
+                  </button>
+                </div>
+              </Field>
+
+              {/* Tabela de serviços */}
               {form.services.length > 0 && (
-                <div className="space-y-3 pt-2">
-                  <p className="text-sm font-semibold text-zinc-700">Detalhes dos serviços selecionados</p>
-                  {form.services.map(s => (
-                    <div key={s.id} className="bg-white border border-zinc-200 rounded-xl p-4 space-y-3">
-                      <p className="text-sm font-semibold text-blue-700">{s.label}</p>
-                      <div className="grid grid-cols-2 gap-3">
-                        <Field label="Área (m²)">
-                          <input value={s.area} onChange={e => updateService(s.id, 'area', e.target.value)}
-                            placeholder="Ex: 150" className={inputCls} />
-                        </Field>
-                        <Field label="Descrição resumida">
-                          <input value={s.description} onChange={e => updateService(s.id, 'description', e.target.value)}
-                            placeholder="Opcional" className={inputCls} />
-                        </Field>
+                <div className="bg-white border border-zinc-200 rounded-xl overflow-hidden">
+                  <p className="text-xs text-blue-600 px-4 py-2.5 bg-blue-50 border-b border-blue-100">
+                    Os campos &apos;Quantidade&apos;, &apos;Unidade&apos; e &apos;Valor Unitário&apos; podem ser editados; é só clicar neles.
+                  </p>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-zinc-100">
+                        <th className="text-center px-4 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wide">Serviço</th>
+                        <th className="text-center px-3 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wide w-24">Quantidade</th>
+                        <th className="text-center px-3 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wide w-20">Unidade</th>
+                        <th className="text-center px-3 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wide w-28">Valor Unitário</th>
+                        <th className="text-center px-3 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wide w-24 leading-tight">Valor<br/>Total</th>
+                        <th className="w-10" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {form.services.map((s, i) => {
+                        const lineTotal = parseVal(s.quantity) * parseVal(s.unit_price)
+                        return (
+                          <tr key={s.key} className={`${i < form.services.length - 1 ? 'border-b border-zinc-100' : ''}`}>
+                            <td className="px-4 py-3 font-semibold text-zinc-800 text-center text-xs leading-tight">{s.name}</td>
+                            <td className="px-3 py-3 text-center">
+                              <input type="number" value={s.quantity}
+                                onChange={e => updateServiceField(s.key, 'quantity', e.target.value)}
+                                className="w-full px-2 py-1.5 text-sm border border-zinc-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-400 text-center" />
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              <input value={s.unit}
+                                onChange={e => updateServiceField(s.key, 'unit', e.target.value)}
+                                className="w-full px-2 py-1.5 text-sm border border-zinc-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-400 text-center" />
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              <input value={s.unit_price}
+                                onChange={e => updateServiceField(s.key, 'unit_price', e.target.value)}
+                                placeholder="0,00"
+                                className="w-full px-2 py-1.5 text-sm border border-zinc-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-400 text-center" />
+                            </td>
+                            <td className="px-3 py-3 text-center font-semibold text-zinc-700 text-sm whitespace-nowrap">
+                              {lineTotal > 0 ? lineTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—'}
+                            </td>
+                            <td className="px-2 py-3 text-center">
+                              <button type="button" onClick={() => removeServiceEntry(s.key)}
+                                className="w-7 h-7 rounded-lg bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition mx-auto">
+                                <X size={13} />
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+
+                  {/* Subtotal / Desconto / Total */}
+                  <div className="border-t border-zinc-200 px-4 py-4 space-y-3 bg-white">
+                    {/* Subtotal */}
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 mb-1.5 uppercase tracking-wide">Subtotal</label>
+                      <div className="relative">
+                        <CreditCard size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                        <div className={inputCls + ' pl-9 text-zinc-500 bg-zinc-50 cursor-default'}>
+                          {subtotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        </div>
                       </div>
                     </div>
-                  ))}
+
+                    {/* Desconto */}
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 mb-1.5 uppercase tracking-wide">Desconto</label>
+                      <div className="flex gap-0">
+                        <input value={form.discount} onChange={e => setF('discount', e.target.value)}
+                          placeholder={form.discount_type === '%' ? '%' : 'R$'}
+                          className="flex-1 px-3 py-2.5 text-sm border border-zinc-200 rounded-l-xl outline-none focus:ring-2 focus:ring-blue-400 transition" />
+                        <div className="flex border border-l-0 border-zinc-200 rounded-r-xl overflow-hidden flex-shrink-0">
+                          {(['%', 'R$'] as const).map(t => (
+                            <button key={t} type="button" onClick={() => setF('discount_type', t)}
+                              className={`px-3 py-2.5 text-xs font-semibold transition border-l border-zinc-200 first:border-l-0 ${form.discount_type === t ? 'bg-blue-600 text-white' : 'bg-white text-zinc-500 hover:bg-zinc-50'}`}>
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Total */}
+                    <div className="pt-1 border-t border-zinc-100">
+                      <p className="text-base font-bold text-zinc-900">
+                        Total: <span className="text-blue-600">{totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {form.services.length === 0 && (
+                <div className="bg-zinc-50 border border-dashed border-zinc-300 rounded-xl p-6 text-center">
+                  <p className="text-sm text-zinc-400">
+                    {form.selected_niches.length === 0
+                      ? 'Selecione um nicho para ver os serviços disponíveis'
+                      : 'Selecione um serviço acima para adicioná-lo à proposta'}
+                  </p>
                 </div>
               )}
             </div>
@@ -490,11 +677,15 @@ export default function NovaPropostaPage() {
               <p className="text-sm text-zinc-500">Defina a data de entrega para cada serviço</p>
               <div className="w-full h-px bg-zinc-200" />
 
-              {form.services.map(s => (
-                <div key={s.id} className="bg-white border border-zinc-200 rounded-xl p-4">
-                  <p className="text-sm font-semibold text-zinc-900 mb-3">{s.label}</p>
-                  <Field label="Data de entrega" required>
-                    <input type="date" value={s.deadline} onChange={e => updateService(s.id, 'deadline', e.target.value)} className={inputCls} />
+              {form.services.length === 0 ? (
+                <div className="bg-zinc-50 border border-dashed border-zinc-300 rounded-xl p-8 text-center">
+                  <p className="text-sm text-zinc-400">Nenhum serviço adicionado na etapa anterior</p>
+                </div>
+              ) : form.services.map(s => (
+                <div key={s.key} className="bg-white border border-zinc-200 rounded-xl p-4">
+                  <p className="text-sm font-semibold text-zinc-900 mb-3">{s.name}</p>
+                  <Field label="Data de entrega">
+                    <input type="date" value={s.deadline} onChange={e => updateServiceField(s.key, 'deadline', e.target.value)} className={inputCls} />
                   </Field>
                 </div>
               ))}
@@ -505,32 +696,36 @@ export default function NovaPropostaPage() {
           {step === 4 && (
             <div className="space-y-5">
               <h2 className="text-xl font-bold text-zinc-900">Financeiro</h2>
-              <p className="text-sm text-zinc-500">Defina os valores de cada serviço e as condições de pagamento</p>
+              <p className="text-sm text-zinc-500">Condições de pagamento e datas importantes</p>
               <div className="w-full h-px bg-zinc-200" />
 
-              {form.services.map(s => (
-                <div key={s.id} className="bg-white border border-zinc-200 rounded-xl p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-sm font-semibold text-zinc-900">{s.label}</p>
-                    {s.area && <span className="text-xs text-zinc-400">{s.area} m²</span>}
+              {/* Resumo de valores */}
+              <div className="bg-white border border-zinc-200 rounded-xl divide-y divide-zinc-100">
+                {form.services.map(s => {
+                  const lineTotal = parseVal(s.quantity) * parseVal(s.unit_price)
+                  return (
+                    <div key={s.key} className="flex items-center justify-between px-4 py-3 text-sm">
+                      <span className="text-zinc-700">{s.name} <span className="text-zinc-400 text-xs">({s.quantity} {s.unit})</span></span>
+                      <span className="font-semibold text-zinc-900">{lineTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                    </div>
+                  )
+                })}
+                {form.discount && parseVal(form.discount) > 0 && (
+                  <div className="flex items-center justify-between px-4 py-3 text-sm text-red-500">
+                    <span>Desconto ({form.discount_type === '%' ? `${form.discount}%` : `R$ ${form.discount}`})</span>
+                    <span>– {discountAmt.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                   </div>
-                  <Field label="Valor (R$)" required>
-                    <input value={s.value} onChange={e => updateService(s.id, 'value', e.target.value)}
-                      placeholder="0,00" className={inputCls} />
-                  </Field>
+                )}
+                <div className="flex items-center justify-between px-4 py-3 bg-blue-600 rounded-b-xl">
+                  <span className="text-white font-semibold text-sm">Total da Proposta</span>
+                  <span className="text-white font-bold text-lg">{totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                 </div>
-              ))}
-
-              {/* Total */}
-              <div className="bg-blue-600 rounded-xl p-4 flex items-center justify-between">
-                <span className="text-white font-semibold text-sm">Total da Proposta</span>
-                <span className="text-white font-bold text-lg">{fmt(String(totalValue))}</span>
               </div>
 
               <div className="bg-white border border-zinc-200 rounded-xl p-4 space-y-4">
                 <Field label="Condições de pagamento">
                   <textarea value={form.payment_terms} onChange={e => setF('payment_terms', e.target.value)}
-                    rows={2} placeholder="Ex: 50% na assinatura, 50% na entrega"
+                    rows={3} placeholder="Ex: 50% na assinatura do contrato, 50% na entrega final"
                     className={inputCls + ' resize-none'} />
                 </Field>
                 <div className="grid grid-cols-2 gap-3">
@@ -591,18 +786,27 @@ export default function NovaPropostaPage() {
                 </div>
                 <div className="p-4">
                   <p className="text-xs font-bold text-zinc-400 uppercase tracking-wide mb-2">Serviços ({form.services.length})</p>
-                  <div className="space-y-1">
-                    {form.services.map(s => (
-                      <div key={s.id} className="flex items-center justify-between text-sm">
-                        <span className="text-zinc-700">{s.label}{s.area ? ` — ${s.area}m²` : ''}</span>
-                        <span className="font-semibold text-zinc-900">{fmt(s.value)}</span>
-                      </div>
-                    ))}
+                  <div className="space-y-1.5">
+                    {form.services.map(s => {
+                      const lineTotal = parseVal(s.quantity) * parseVal(s.unit_price)
+                      return (
+                        <div key={s.key} className="flex items-center justify-between text-sm">
+                          <span className="text-zinc-700">{s.name} <span className="text-zinc-400 text-xs">× {s.quantity} {s.unit}</span></span>
+                          <span className="font-semibold text-zinc-900">{lineTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
+                {form.discount && parseVal(form.discount) > 0 && (
+                  <div className="p-4 flex items-center justify-between text-sm text-red-500">
+                    <span>Desconto ({form.discount_type === '%' ? `${form.discount}%` : `R$ ${form.discount}`})</span>
+                    <span>– {discountAmt.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                  </div>
+                )}
                 <div className="p-4 flex items-center justify-between">
                   <p className="text-sm font-bold text-zinc-700">Total</p>
-                  <p className="text-lg font-bold text-blue-600">{fmt(String(totalValue))}</p>
+                  <p className="text-lg font-bold text-blue-600">{totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
                 </div>
                 {form.valid_until && (
                   <div className="p-4">

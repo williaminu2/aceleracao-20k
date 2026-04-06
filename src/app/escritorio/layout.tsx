@@ -3,12 +3,13 @@
 import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { LayoutDashboard, FileText, Users, ArrowLeft, ChevronLeft } from 'lucide-react'
+import { FileText, Users, ArrowLeft, ChevronLeft, Settings } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
 const NAV = [
   { href: '/escritorio/propostas', label: 'Propostas', icon: FileText },
   { href: '/escritorio/clientes', label: 'Clientes', icon: Users },
+  { href: '/escritorio/configuracoes', label: 'Configurações', icon: Settings },
 ]
 
 export default function EscritorioLayout({ children }: { children: React.ReactNode }) {
