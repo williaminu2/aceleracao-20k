@@ -8,6 +8,7 @@ import {
 import { Avatar } from '@/components/ui/Avatar'
 import { timeAgo } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
+import { MemberProfileModal } from '@/components/membros/MemberProfileModal'
 
 export interface Post {
   id: string
@@ -43,6 +44,14 @@ interface PostCardProps {
   onDeleted?: (id: string) => void
 }
 
+function parseContent(raw: string): { text: string; imageUrl: string | null } {
+  const match = raw.match(/\[img:(https?:\/\/[^\]]+)\]/)
+  if (match) {
+    return { text: raw.replace(match[0], '').trim(), imageUrl: match[1] }
+  }
+  return { text: raw, imageUrl: null }
+}
+
 export function PostCard({ post, featured, onDeleted }: PostCardProps) {
   const [liked, setLiked] = useState(post.likedByMe ?? false)
   const [likes, setLikes] = useState(post.likes)
@@ -55,7 +64,6 @@ export function PostCard({ post, featured, onDeleted }: PostCardProps) {
   const [submitting, setSubmitting] = useState(false)
   const [myProfile, setMyProfile] = useState<{ id: string; full_name: string; avatar_url: string | null; role: string } | null>(null)
 
-  // Menu state
   const [showMenu, setShowMenu] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
   const [showMoveModal, setShowMoveModal] = useState(false)
@@ -65,7 +73,10 @@ export function PostCard({ post, featured, onDeleted }: PostCardProps) {
   const [editSaving, setEditSaving] = useState(false)
   const [deleted, setDeleted] = useState(false)
   const [feedbackDisabled, setFeedbackDisabled] = useState(false)
+  const [profileModalId, setProfileModalId] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+
+  const { text: postText, imageUrl: postImage } = parseContent(post.content)
 
   useEffect(() => {
     async function loadMe() {
@@ -182,9 +193,20 @@ export function PostCard({ post, featured, onDeleted }: PostCardProps) {
         {/* Header */}
         <div className="flex items-start justify-between p-4 pb-3">
           <div className="flex items-center gap-2">
-            <Avatar name={post.author} src={post.authorAvatar} size="sm" level={post.authorLevel} />
+            <Avatar
+              name={post.author}
+              src={post.authorAvatar}
+              size="sm"
+              level={post.authorLevel}
+              onClick={post.authorId ? () => setProfileModalId(post.authorId!) : undefined}
+            />
             <div>
-              <p className="text-sm font-semibold text-zinc-900 leading-tight">{post.author}</p>
+              <button
+                className="text-sm font-semibold text-zinc-900 leading-tight hover:text-orange-500 transition text-left"
+                onClick={post.authorId ? () => setProfileModalId(post.authorId!) : undefined}
+              >
+                {post.author}
+              </button>
               <p className="text-[11px] text-zinc-400 leading-tight">
                 {timeAgo(post.createdAt)} em{' '}
                 <span className="text-orange-500 font-medium">{post.channel}</span>
@@ -237,8 +259,20 @@ export function PostCard({ post, featured, onDeleted }: PostCardProps) {
 
         {/* Content */}
         <div className="px-4 pb-3 text-sm text-zinc-700 leading-relaxed whitespace-pre-line">
-          {post.content}
+          {postText}
         </div>
+
+        {/* Image */}
+        {postImage && (
+          <div className="px-4 pb-3">
+            <img
+              src={postImage}
+              alt="Imagem do post"
+              className="w-full rounded-xl border border-zinc-100 object-cover max-h-80"
+              loading="lazy"
+            />
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex items-center gap-4 px-4 py-2.5 border-t border-zinc-100">
@@ -274,10 +308,20 @@ export function PostCard({ post, featured, onDeleted }: PostCardProps) {
               <div className="px-4 py-3 space-y-4 max-h-72 overflow-y-auto">
                 {comments.map(c => (
                   <div key={c.id} className="flex gap-2.5">
-                    <Avatar name={c.profiles?.full_name || 'Membro'} src={c.profiles?.avatar_url} size="sm" />
+                    <Avatar
+                      name={c.profiles?.full_name || 'Membro'}
+                      src={c.profiles?.avatar_url}
+                      size="sm"
+                      onClick={() => setProfileModalId(c.author_id)}
+                    />
                     <div className="flex-1 min-w-0">
                       <div className="bg-zinc-50 rounded-xl px-3 py-2">
-                        <p className="text-xs font-semibold text-zinc-800 mb-0.5">{c.profiles?.full_name || 'Membro'}</p>
+                        <button
+                          className="text-xs font-semibold text-zinc-800 mb-0.5 hover:text-orange-500 transition text-left"
+                          onClick={() => setProfileModalId(c.author_id)}
+                        >
+                          {c.profiles?.full_name || 'Membro'}
+                        </button>
                         <p className="text-sm text-zinc-700 leading-relaxed">{c.content}</p>
                       </div>
                       <p className="text-[10px] text-zinc-400 mt-1 pl-1">{timeAgo(c.created_at)}</p>
@@ -368,6 +412,11 @@ export function PostCard({ post, featured, onDeleted }: PostCardProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Member profile modal */}
+      {profileModalId && (
+        <MemberProfileModal memberId={profileModalId} onClose={() => setProfileModalId(null)} />
       )}
     </>
   )

@@ -7,6 +7,7 @@ interface AvatarProps {
   src?: string | null
   size?: 'sm' | 'md' | 'lg'
   level?: number
+  onClick?: () => void
 }
 
 const sizes = {
@@ -15,9 +16,12 @@ const sizes = {
   lg: 'w-12 h-12 text-base',
 }
 
-export function Avatar({ name, src, size = 'md', level }: AvatarProps) {
+export function Avatar({ name, src, size = 'md', level, onClick }: AvatarProps) {
   return (
-    <div className="relative inline-block">
+    <div
+      className={`relative inline-block flex-shrink-0 ${onClick ? 'cursor-pointer' : ''}`}
+      onClick={onClick}
+    >
       <div className={`${sizes[size]} rounded-full overflow-hidden flex-shrink-0`}>
         {src ? (
           <img src={src} alt={name} className="w-full h-full object-cover" />
